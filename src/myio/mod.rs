@@ -1,8 +1,6 @@
 use std::io::{self, Read};
 use std::str::FromStr;
 use std::fmt::Debug;
-use std::rc::Rc;
-use std::cell::RefCell;
 
 pub fn string_to_parsed_tokens<T>(s: String) -> Vec<T>
 where
@@ -25,14 +23,6 @@ where
   let mut s = String::new();
   io::stdin().read_to_string(&mut s).expect("couldn't read from stdin");
   return string_to_parsed_tokens::<T>(s);
-}
-
-pub fn vec_to_rc_vec<T>(mut v: Vec<T>) -> Vec<Rc<RefCell<T>>> {
-  let mut ret = Vec::with_capacity(v.len());
-  for _ in 0..v.len() {
-    ret.push(Rc::new(v.pop().unwrap()));
-  }
-  ret
 }
 
 #[cfg(test)]
