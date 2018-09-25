@@ -1,8 +1,8 @@
-
 extern crate rand;
 use std::ops::AddAssign;
 use std::cell::RefCell;
 use std::fmt;
+use std::time::Instant;
 use kmeans::rand::prelude::*; //this feels really weird
 
 #[derive(Debug, Clone)]
@@ -23,7 +23,7 @@ pub struct Point {
 #[derive(Clone, Debug)]
 pub struct Cluster {
   pub cluster_id: u32,
-  pub coord: Vec<f64>, //gonna get copied, but not TOO eggregious since * of copies is K*D*Iters
+  pub coord: Vec<f64>,
   pub points: RefCell<Vec<Point>>
 }
 
@@ -74,6 +74,7 @@ impl KMeansRunner {
     println!("config for run: {:?}", self.cfg);
     let mut iters = 0;
     let mut converged = false;
+    let mark_start = Instant::now();
     while iters < self.cfg.max_iterations && !converged {
       converged = true;
       let mut moving_points = Vec::new();
@@ -89,7 +90,8 @@ impl KMeansRunner {
       self.clusters.iter_mut().for_each(|cl| cl.update_center());
       iters += 1;
     }
-    println!("ran for {} iterations", iters);
+    let mark_end = Instant::now();
+    println!("ran for {} iterations, completed in {:?}", iters, mark_end - mark_start);
     println!("clusters:");
     for cl in &self.clusters {
       println!("{}", cl);
