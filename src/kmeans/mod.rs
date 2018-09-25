@@ -88,9 +88,12 @@ impl KMeansRunner {
         });
       self.clusters.iter_mut().for_each(|cl| cl.update_center());
       iters += 1;
-      println!();
     }
     println!("ran for {} iterations", iters);
+    println!("clusters:");
+    for cl in &self.clusters {
+      println!("{}", cl);
+    }
     
   }
 }
@@ -156,7 +159,7 @@ impl AddAssign<Point> for Cluster {
 
 impl fmt::Display for Cluster {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "{{cluster {}: {:?}}}", self.cluster_id, self.coord)
+    write!(f, "cluster {{id:{}, points:{}, coord:{:?}}}", self.cluster_id, self.points.borrow().len(), self.coord)
   }
 }
 
