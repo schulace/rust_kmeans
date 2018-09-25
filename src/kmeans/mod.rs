@@ -74,7 +74,7 @@ impl KMeansRunner {
     println!("config for run: {:?}", self.cfg);
     let mut iters = 0;
     let mut converged = false;
-    while iters < self.cfg.max_iterations || !converged {
+    while iters < self.cfg.max_iterations && !converged {
       converged = true;
       let mut moving_points = Vec::new();
       for cluster in &self.clusters {
@@ -86,9 +86,9 @@ impl KMeansRunner {
           self.clusters[cluster_id as usize] += point;
           converged = false; //so long as even 1 point moves we haven't converged
         });
-      self.clusters.iter_mut().for_each(Cluster::update_center);
+      self.clusters.iter_mut().for_each(|cl| cl.update_center());
       iters += 1;
-      println!("cluster 0 is {}", self.clusters[0]);
+      println!();
     }
     println!("ran for {} iterations", iters);
     
