@@ -1,6 +1,7 @@
 use std::io::{self, Read};
 use std::str::FromStr;
 use std::fmt::Debug;
+use std::time::{Instant, Duration};
 
 pub fn string_to_parsed_tokens<T>(s: String) -> Vec<T>
 where
@@ -23,6 +24,17 @@ where
   let mut s = String::new();
   io::stdin().read_to_string(&mut s).expect("couldn't read from stdin");
   return string_to_parsed_tokens::<T>(s);
+}
+
+/// benchmark a function. Pass in a closure taking no parameters, returns
+/// whatever the closure returned and how long it took to run the closure
+pub fn benchmark<T, F>(func: F) -> (Duration, T)
+where F: FnOnce() -> T
+{
+  let time_start = Instant::now();
+  let res = func();
+  let time_end = Instant::now();
+  (time_end - time_start, res)
 }
 
 #[cfg(test)]

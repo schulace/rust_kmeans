@@ -2,8 +2,8 @@ extern crate rand;
 use std::ops::AddAssign;
 use std::cell::RefCell;
 use std::fmt;
-use std::time::Instant;
-use kmeans::rand::prelude::*; //this feels really weird
+use self::rand::Rng;
+use self::rand::seq::sample_slice_ref;
 
 #[derive(Debug, Clone)]
 pub struct KmeansConfig {
@@ -29,8 +29,8 @@ pub struct Cluster {
 
 
 pub struct KMeansRunner {
-  cfg: KmeansConfig,
-  clusters: Vec<Cluster>
+  pub cfg: KmeansConfig,
+  pub clusters: Vec<Cluster>
 }
 
 impl From<Vec<u32>> for KmeansConfig {
@@ -48,10 +48,9 @@ impl From<Vec<u32>> for KmeansConfig {
 //do I want to use a K-D tree? is that ||izable? Should I test a KD tree against my || algo?
 impl KMeansRunner {
   ///set up the points. The example sets each cluster at the same spot as a random point
-  pub fn new(cfg: &KmeansConfig, mut points: Vec<Point>) -> KMeansRunner {
-    thread_rng().shuffle(&mut points); //randomize the order of the points
-    let clusters = points.iter()
-      .take(cfg.k as usize)
+  pub fn new<R: Rng>(cfg: &KmeansConfig, points: Vec<Point>, random_src: &mut R) -> KMeansRunner {
+    
+    let clusters = sample_slice_ref(random_src, &points, cfg.k as usize).iter()
       .enumerate()
       .map(|(id, p)| {
         Cluster::new(id as u32, p.coord.clone())
@@ -70,33 +69,36 @@ impl KMeansRunner {
     slf
   }
   //clusters keep track of their points. 
-  pub fn run(&mut self) {
-    println!("config for run: {:?}", self.cfg);
+  pub fn run(&mut self) -> u32 {
     let mut iters = 0;
     let mut converged = false;
-    let mark_start = Instant::now();
     while iters < self.cfg.max_iterations && !converged {
       converged = true;
       let mut moving_points = Vec::new();
+
+      //remove all points that aren't closest to their associated cluster and store them
       for cluster in &self.clusters {
         moving_points.push(cluster.partition_unwanted(&self.clusters));
       }
-      moving_points.into_iter().flat_map(Vec::into_iter) //flattening our moving points
-        //then moving them into the appropriate spot
-        .for_each(|(cluster_id, point)| {
+
+      //add each point that was removed into its closest cluster
+      for (cluster_id, point) in moving_points.into_iter().flat_map(Vec::into_iter) {
           self.clusters[cluster_id as usize] += point;
-          converged = false; //so long as even 1 point moves we haven't converged
-        });
-      self.clusters.iter_mut().for_each(|cl| cl.update_center());
+          converged = false;
+      }
+
+      //recalculate the center of each cluster
+      for cluster in &mut self.clusters {
+        cluster.update_center()
+      }
       iters += 1;
     }
-    let mark_end = Instant::now();
-    println!("ran for {} iterations, completed in {:?}", iters, mark_end - mark_start);
-    println!("clusters:");
-    for cl in &self.clusters {
-      println!("{}", cl);
+    iters
+  }
+  pub fn print_clusters(&self) {
+    for cluster in &self.clusters {
+      println!("{}", cluster);
     }
-    
   }
 }
 
