@@ -17,5 +17,6 @@ fn main() {
   let (time, iterations) = benchmark(|| runner.run());
   println!("ran in {:?} performing {} iterations", time, iterations);
   println!("total time: {:?}", cons_time + time);
+
   runner.print_clusters();
 }

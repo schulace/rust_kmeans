@@ -1,9 +1,9 @@
 extern crate rand;
-use std::ops::AddAssign;
-use std::cell::RefCell;
-use std::fmt;
-use self::rand::Rng;
+mod myiters;
 use self::rand::seq::sample_slice_ref;
+use self::rand::Rng;
+use self::myiters::SortedSliceIter;
+use std::fmt;
 
 #[derive(Debug, Clone)]
 pub struct KmeansConfig {
@@ -11,36 +11,36 @@ pub struct KmeansConfig {
   pub spatial_dimensions: u32, //dimensions for the algorithm
   pub k: u32,
   pub max_iterations: u32,
-  pub has_name: bool //always false
+  pub has_name: bool, //always false
 }
 
 #[derive(Debug, Clone)]
 pub struct Point {
   point_id: usize,
-  coord: Vec<f64>
+  cluster_id: usize,
+  coord: Vec<f64>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Cluster {
-  pub cluster_id: u32,
+  pub cluster_id: usize,
   pub coord: Vec<f64>,
-  pub points: RefCell<Vec<Point>>
 }
-
 
 pub struct KMeansRunner {
   pub cfg: KmeansConfig,
-  pub clusters: Vec<Cluster>
+  pub clusters: Vec<Cluster>,
+  pub points: Vec<Point>,
 }
 
 impl From<Vec<u32>> for KmeansConfig {
   fn from(v: Vec<u32>) -> KmeansConfig {
-    KmeansConfig{
+    KmeansConfig {
       total_points: v[0],
       spatial_dimensions: v[1],
       k: v[2],
       max_iterations: v[3],
-      has_name: false
+      has_name: false,
     }
   }
 }
@@ -49,47 +49,31 @@ impl From<Vec<u32>> for KmeansConfig {
 impl KMeansRunner {
   ///set up the points. The example sets each cluster at the same spot as a random point
   pub fn new<R: Rng>(cfg: &KmeansConfig, points: Vec<Point>, random_src: &mut R) -> KMeansRunner {
-    
-    let clusters = sample_slice_ref(random_src, &points, cfg.k as usize).iter()
+    let clusters = sample_slice_ref(random_src, &points, cfg.k as usize)
+      .iter()
       .enumerate()
-      .map(|(id, p)| {
-        Cluster::new(id as u32, p.coord.clone())
-      })
+      .map(|(id, p)| Cluster::new(id as u32, p.coord.clone()))
       .collect::<Vec<_>>();
-    let mut slf = KMeansRunner {
+
+    KMeansRunner {
       clusters,
-      cfg: cfg.clone()
-    };
-    //below feels a bit inefficient, but idk how to do it without the copy bc of the borrow on clusters
-    let closest_clusters = points.into_iter().map(|pt| (pt.closest_cluster(&slf.clusters), pt)).collect::<Vec<_>>();
-    for (cluster_id, point) in closest_clusters {
-      slf.clusters[cluster_id as usize] += point;
+      cfg: cfg.clone(),
+      points,
     }
-    slf.clusters.iter_mut().for_each(Cluster::update_center);
-    slf
   }
-  //clusters keep track of their points. 
+  //clusters keep track of their points.
   pub fn run(&mut self) -> u32 {
     let mut iters = 0;
     let mut converged = false;
     while iters < self.cfg.max_iterations && !converged {
       converged = true;
-      let mut moving_points = Vec::new();
-
-      //remove all points that aren't closest to their associated cluster and store them
-      for cluster in &self.clusters {
-        moving_points.push(cluster.partition_unwanted(&self.clusters));
+      for point in &mut self.points {
+        converged = point.change_cluster(&self.clusters) && converged;
       }
-
-      //add each point that was removed into its closest cluster
-      for (cluster_id, point) in moving_points.into_iter().flat_map(Vec::into_iter) {
-          self.clusters[cluster_id as usize] += point;
-          converged = false;
-      }
-
-      //recalculate the center of each cluster
-      for cluster in &mut self.clusters {
-        cluster.update_center()
+      self.points.sort_by(|p1, p2| p1.cluster_id.cmp(&p2.cluster_id));
+      let grouped_points_iterator = SortedSliceIter::new(&self.points, |p1, p2| p1.cluster_id == p2.cluster_id);
+      for (cluster, point_slice) in self.clusters.iter_mut().zip(grouped_points_iterator) {
+        cluster.update_center(point_slice);
       }
       iters += 1;
     }
@@ -105,65 +89,55 @@ impl KMeansRunner {
 impl Cluster {
   fn new(cluster_id: u32, coord: Vec<f64>) -> Cluster {
     Cluster {
-      cluster_id,
+      cluster_id: cluster_id as usize,
       coord,
-      points: RefCell::new(Vec::new())
     }
   }
-  fn update_center(&mut self) {
-    for (idx, i) in self.coord.iter_mut().enumerate() { //would be a good spot for SIMD to do a bunch of vector adds
+  fn update_center(&mut self, points: &[Point]) {
+    for (idx, i) in self.coord.iter_mut().enumerate() {
+      //would be a good spot for SIMD to do a bunch of vector adds
       *i = 0.0;
-      for p in self.points.borrow().iter() {
+      for p in points {
         *i += p.coord[idx];
       }
-    *i = *i / self.points.borrow().len() as f64
+      *i = *i / points.len() as f64
     }
-  }
-  ///note that this will actually MUTABLY borrow and change self.points
-  fn partition_unwanted(&self, clusters: &Vec<Cluster>) -> Vec<(u32, Point)> {
-    let mut ret: Vec<(u32, Point)> = Vec::new();
-    let mut points = self.points.borrow_mut();
-    let mut i = 0;
-    let mut top = points.len();
-    while i < top { //the lengths I'll go to avoid a copy
-      let best_cluster = points[i].closest_cluster(clusters);
-      if best_cluster != self.cluster_id {
-        ret.push((best_cluster, points.remove(i)));
-        top -= 1;
-      } else {
-        i += 1
-      }
-    }
-    ret
   }
 }
 
 impl Point {
   fn distance(&self, c: &Cluster) -> f64 {
-    let ret = self.coord.iter()
+    let ret = self
+      .coord
+      .iter()
       .zip(c.coord.iter())
-      .map(|(a,b)| (a - b).powi(2))
+      .map(|(a, b)| (a - b).powi(2))
       .sum::<f64>()
       .sqrt();
     ret
   }
-  fn closest_cluster(&self, clusters: &Vec<Cluster>) -> u32 {
-    clusters.iter()
+  fn closest_cluster(&self, clusters: &Vec<Cluster>) -> usize {
+    clusters
+      .iter()
       .map(|cl| (self.distance(cl), cl.cluster_id))
       .min_by(|(d1, _), (d2, _)| d1.partial_cmp(d2).expect("tried a NaN comparison"))
-      .unwrap().1
+      .unwrap()
+      .1
   }
-}
-
-impl AddAssign<Point> for Cluster {
-  fn add_assign(&mut self, p: Point) {
-    self.points.borrow_mut().push(p);
+  fn change_cluster(&mut self, clusters: &Vec<Cluster>) -> bool {
+    let old_cluster = self.cluster_id;
+    self.cluster_id = self.closest_cluster(&clusters);
+    old_cluster == self.cluster_id
   }
 }
 
 impl fmt::Display for Cluster {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "cluster {{id:{}, points:{}, coord:{:?}}}", self.cluster_id, self.points.borrow().len(), self.coord)
+    write!(
+      f,
+      "cluster {{id:{}, coord:{:?}}}",
+      self.cluster_id, self.coord
+    )
   }
 }
 
@@ -172,7 +146,8 @@ pub fn points_from_vec(v: Vec<f64>, dim: u32) -> Vec<Point> {
   for (point_id, slice) in v.chunks(dim as usize).enumerate() {
     points.push(Point {
       point_id,
-      coord: slice.to_vec()
+      cluster_id: 0, //a tad hacky
+      coord: slice.to_vec(),
     });
   }
   points
@@ -183,42 +158,16 @@ mod test {
   use super::*;
   #[test]
   fn pfv_test() {
-  let points = points_from_vec(vec![1.0,2.0,3.0,4.0,5.0,6.0], 3);
-  assert_eq!(points.len(), 2);
-  assert_eq!(points[0].coord, vec![1.0, 2.0, 3.0]);
+    let points = points_from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 3);
+    assert_eq!(points.len(), 2);
+    assert_eq!(points[0].coord, vec![1.0, 2.0, 3.0]);
   }
 
   #[test]
   fn test_cluster_add_and_update() {
-    let mut cl = Cluster::new(0, vec![1.0,2.0,3.0]);
-    cl += Point{point_id: 0, coord: vec![0.0, 0.0, 0.0]};
-    cl += Point{point_id: 1, coord: vec![10.0, 10.0, 10.0]};
-    assert_eq!(cl.points.borrow().len(), 2);
-    cl.update_center();
+    let mut cl = Cluster::new(0, vec![1.0, 2.0, 3.0]);
+    let points = points_from_vec(vec![9.0, 8.0, 7.0, 5.0, 5.0, 5.0], 3);
+    cl.update_center(points.as_slice());
     assert_eq!(cl.coord, vec![5.0, 5.0, 5.0]);
-  }
-
-  #[test]
-  fn test_closest_cluster() {
-    let mut c1 = Cluster::new(0, vec![1.0, 1.0]);
-    let c2 = Cluster::new(1, vec![4.0, 4.0]);
-    c1 += Point{point_id: 0, coord: vec![5.0, 5.0]};
-    c1 += Point{point_id: 1, coord: vec![1.0, 0.0]};
-    let clusters = vec![c1, c2];
-    assert_eq!(clusters[0].points.borrow()[0].closest_cluster(&clusters), 1);
-  }
-
-  #[test]
-  fn test_cluster_unwanted() {
-    let mut c1 = Cluster::new(0, vec![1.0, 1.0]);
-    let c2 = Cluster::new(1, vec![4.0, 4.0]);
-    c1 += Point{point_id: 0, coord: vec![5.0, 5.0]};
-    c1 += Point{point_id: 1, coord: vec![1.0, 0.0]};
-    let clusters = vec![c1, c2];
-    let rejected_p = clusters[0].partition_unwanted(&clusters);
-    assert_eq!(clusters[0].points.borrow().len(), 1);
-    assert_eq!(rejected_p[0].1.point_id, 0);
-    assert_eq!(rejected_p[0].0, 1);
-    //how do we allow self-mutation while borrowing collection with self?
   }
 }
