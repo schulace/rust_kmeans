@@ -8,3 +8,11 @@ main() reads from stdin. The first line is expected to contain 5 numbers, in the
 This project stores all points inside of one KmeansRunner struct, instead of moving them around to different clusters. Points are associated with a cluster by storing cluster id which corresponds to the index of the cluster in the KmeansRunner's array of clusters. On each iteration, each point finds its nearest cluster, and updates itself to point to said cluster. Next, The points are sorted by cluster, then split off into slices by cluster. Each cluster is then given a reference to the slice of points associated with it in order to compute its new center. This process is iterated over and over until max_iterations is hit or convergence is reached.
 
 For parallelism, this project uses the rayon crate to transform its iterators into parallel iterators.
+
+Performance on various sized inputs:
+
+![image](images/2000x5.png)
+
+![image](images/2000x10.png)
+
+![image](images/4000x5.png)
