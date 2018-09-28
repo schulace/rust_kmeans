@@ -29,6 +29,7 @@ pub struct Cluster {
   pub coord: Vec<f64>,
 }
 
+#[derive(Clone)]
 pub struct KMeansRunner {
   pub cfg: KmeansConfig,
   pub clusters: Vec<Cluster>,
@@ -50,8 +51,8 @@ impl From<Vec<u32>> for KmeansConfig {
 //do I want to use a K-D tree? is that ||izable? Should I test a KD tree against my || algo?
 impl KMeansRunner {
   ///set up the points. The example sets each cluster at the same spot as a random point
-  pub fn new<R: Rng>(cfg: &KmeansConfig, points: Vec<Point>, random_src: &mut R) -> KMeansRunner {
-    let clusters = sample_slice_ref(random_src, &points, cfg.k as usize)
+  pub fn new<R: Rng>(cfg: &KmeansConfig, points: Vec<Point>, mut random_src: R) -> KMeansRunner {
+    let clusters = sample_slice_ref(&mut random_src, &points, cfg.k as usize)
       .iter()
       .enumerate()
       .map(|(id, p)| Cluster::new(id as u32, p.coord.clone()))
@@ -64,7 +65,7 @@ impl KMeansRunner {
     }
   }
   //clusters keep track of their points.
-  pub fn run(&mut self) -> u32 {
+  pub fn run_par(&mut self) -> u32 {
     let mut iters = 0;
     let mut converged = false;
     while iters < self.cfg.max_iterations && !converged {
@@ -82,6 +83,26 @@ impl KMeansRunner {
     }
     iters
   }
+  pub fn run_seq(&mut self) -> u32 {
+    let mut iters = 0;
+    let mut converged = false;
+    while iters < self.cfg.max_iterations && !converged {
+      let points = &mut self.points;
+      let clusters = &mut self.clusters;
+      converged = points.iter_mut()
+        .map(|ref mut point| point.change_cluster(clusters))
+        .fold(true, |a,b| a && b);
+      points.sort_unstable_by_key(|param| param.cluster_id);
+      let grouped_points: Vec<&[Point]> = SortedSliceIter::new(points, |p1, p2| p1.cluster_id == p2.cluster_id).collect();
+      clusters.iter_mut()
+        .zip(grouped_points.iter())
+        .for_each(|(cluster, point_slice)| cluster.update_center(point_slice));
+      iters += 1;
+    }
+    iters
+  }
+
+  #[allow(dead_code)]
   pub fn print_clusters(&self) {
     for cluster in &self.clusters {
       println!("{}", cluster);
@@ -110,14 +131,12 @@ impl Cluster {
 
 impl Point {
   fn distance(&self, c: &Cluster) -> f64 {
-    let ret = self
-      .coord
-      .iter()
+    self.coord.iter()
       .zip(c.coord.iter())
-      .map(|(a, b)| (a - b).powi(2))
+      .map(|(a, b)| (a - b)
+      .powi(2))
       .sum::<f64>()
-      .sqrt();
-    ret
+      .sqrt()
   }
   fn closest_cluster(&self, clusters: &Vec<Cluster>) -> usize {
     clusters
