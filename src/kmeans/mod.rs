@@ -1,8 +1,10 @@
 extern crate rand;
+extern crate rayon;
 mod myiters;
 use self::rand::seq::sample_slice_ref;
 use self::rand::Rng;
 use self::myiters::SortedSliceIter;
+use self::rayon::prelude::*;
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -66,15 +68,16 @@ impl KMeansRunner {
     let mut iters = 0;
     let mut converged = false;
     while iters < self.cfg.max_iterations && !converged {
-      converged = true;
-      for point in &mut self.points {
-        converged = point.change_cluster(&self.clusters) && converged;
-      }
-      self.points.sort_by(|p1, p2| p1.cluster_id.cmp(&p2.cluster_id));
-      let grouped_points_iterator = SortedSliceIter::new(&self.points, |p1, p2| p1.cluster_id == p2.cluster_id);
-      for (cluster, point_slice) in self.clusters.iter_mut().zip(grouped_points_iterator) {
-        cluster.update_center(point_slice);
-      }
+      let points = &mut self.points;
+      let clusters = &mut self.clusters;
+      converged = points.par_iter_mut()
+        .map(|ref mut point| point.change_cluster(clusters))
+        .reduce(|| true, |a,b| a && b);
+      points.par_sort_unstable_by_key(|param| param.cluster_id);
+      let grouped_points: Vec<&[Point]> = SortedSliceIter::new(points, |p1, p2| p1.cluster_id == p2.cluster_id).collect();
+      clusters.par_iter_mut()
+        .zip_eq(grouped_points.par_iter())
+        .for_each(|(cluster, point_slice)| cluster.update_center(point_slice));
       iters += 1;
     }
     iters
