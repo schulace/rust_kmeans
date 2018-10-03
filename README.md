@@ -11,8 +11,8 @@ For parallelism, this project uses the rayon crate to transform its iterators in
 
 Performance on various sized inputs:
 
-![image](images/2000x5.png)
+![image](images/2000x5.png) ![image](images/2000x5_speedup.png)
 
-![image](images/2000x10.png)
+![image](images/2000x10.png) ![image](images/2000x10_speedup.png)
 
-![image](images/4000x5.png)
+![image](images/4000x5.png) ![image](images/4000x5_speedup.png)
