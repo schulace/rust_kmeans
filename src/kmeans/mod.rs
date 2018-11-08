@@ -27,6 +27,7 @@ pub struct Point {
 pub struct Cluster {
   pub cluster_id: usize,
   pub coord: Vec<f64>,
+  pub cluster_size: usize
 }
 
 #[derive(Clone)]
@@ -102,6 +103,60 @@ impl KMeansRunner {
     iters
   }
 
+  pub fn run_par_2(&mut self) -> u32 {
+    let mut iters = 0;
+    let mut converged = false;
+    while iters < self.cfg.max_iterations && !converged {
+      let points = &mut self.points;
+      let clusters = &mut self.clusters;
+      converged = points.par_iter_mut()
+        .map(|ref mut point| point.change_cluster(clusters))
+        .reduce(|| true, |a,b| a && b);
+      clusters.par_iter_mut().for_each(|cluster| {
+        //zero cluster
+        for elem in &mut cluster.coord {
+          *elem = 0.0;
+        }
+        //add all points belonging to this cluster to its point
+        let id = cluster.cluster_id;
+        for point in points.iter().filter(|point| point.cluster_id == id) {
+          cluster.add_point(point);
+        }
+        //divide by the number of points
+        cluster.average_center();
+      });
+      iters += 1;
+    }
+    iters
+  }
+
+  pub fn run_seq_2(&mut self) -> u32 {
+    let mut iters = 0;
+    let mut converged = false;
+    while iters < self.cfg.max_iterations && !converged {
+      let points = &mut self.points;
+      let clusters = &mut self.clusters;
+      converged = points.iter_mut()
+        .map(|ref mut point| point.change_cluster(clusters))
+        .fold(true, |a,b| a && b);
+      for cluster in clusters {
+        //zero cluster
+        for elem in &mut cluster.coord {
+          *elem = 0.0;
+        }
+        //add all points belonging to this cluster to its point
+        let id = cluster.cluster_id;
+        for point in points.iter().filter(|point| point.cluster_id == id) {
+          cluster.add_point(point);
+        }
+        //divide by the number of points
+        cluster.average_center();
+      }
+      iters += 1;
+    }
+    iters
+  }
+
   #[allow(dead_code)]
   pub fn print_clusters(&self) {
     for cluster in &self.clusters {
@@ -115,6 +170,7 @@ impl Cluster {
     Cluster {
       cluster_id: cluster_id as usize,
       coord,
+      cluster_size: 0
     }
   }
   fn update_center(&mut self, points: &[Point]) {
@@ -127,6 +183,17 @@ impl Cluster {
       *i = *i / points.len() as f64
     }
   }
+  fn add_point(&mut self, point: &Point) {
+    for (my_dim, point_dim) in self.coord.iter_mut().zip(point.coord.iter()) {
+      *my_dim += *point_dim;
+    }
+    self.cluster_size += 1;
+  }
+  fn average_center(&mut self) {
+    for dim in &mut self.coord {
+      *dim = *dim / (self.cluster_size as f64);
+    }
+  }
 }
 
 impl Point {
@@ -136,7 +203,7 @@ impl Point {
       .map(|(a, b)| (a - b)
       .powi(2))
       .sum::<f64>()
-      .sqrt()
+      //.sqrt() //don't need this line as we just try to find which is closest not actual distance
   }
   fn closest_cluster(&self, clusters: &Vec<Cluster>) -> usize {
     clusters
@@ -146,6 +213,8 @@ impl Point {
       .unwrap()
       .1
   }
+  /// changes the cluster_id if the point to the closest cluster in clusters
+  /// returns true if cluster_id did not change
   fn change_cluster(&mut self, clusters: &Vec<Cluster>) -> bool {
     let old_cluster = self.cluster_id;
     self.cluster_id = self.closest_cluster(&clusters);
